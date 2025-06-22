@@ -166,17 +166,22 @@ pub fn boot_system(kernel_path: &str) {
 
     let mem_map =
         uefi::boot::memory_map(MemoryType::LOADER_DATA).expect("Failed to get memory map");
-    let max_usable_phys_addr = if let Some(addr) = find_max_usable_phys_addr(&mem_map) {
-        info!("Max usable physical address found: 0x{:x}", addr.as_u64());
-        addr
-    } else {
-        panic!("Failed to get max phys addr");
-    };
+    let max_usable_phys_addr = find_max_usable_phys_addr(&mem_map);
+    info!(
+        "Max usable physical address found: 0x{:x}",
+        max_usable_phys_addr.as_u64()
+    );
 
     info!("[boot] Starting kernel load from path: {kernel_path}");
     // Set up physical memory offset (1 MiB)
     let phys_offset = PhysAddr::new(0x100000);
-    let kernel_entry = load_kernel(kernel_path, &mut page_table, &mut frame_alloc, max_usable_phys_addr, Some(phys_offset));
+    let kernel_entry = load_kernel(
+        kernel_path,
+        &mut page_table,
+        &mut frame_alloc,
+        max_usable_phys_addr,
+        Some(phys_offset),
+    );
     info!("[boot] Kernel load finished");
     info!("[boot] Kernel entry point: 0x{:x}", kernel_entry as usize);
 
@@ -236,30 +241,20 @@ pub fn boot_system(kernel_path: &str) {
 }
 
 #[cfg(feature = "uefi")]
-pub fn find_max_usable_phys_addr<T: MemoryMap>(mem_map: &T) -> Option<PhysAddr> {
-    let mut max_phys_addr: Option<PhysAddr> = None;
-    for entry in mem_map.entries() {
-        use uefi::boot::MemoryType;
+pub fn find_max_usable_phys_addr<T: MemoryMap>(mem_map: &T) -> PhysAddr {
+    extern crate alloc;
+    use alloc::vec::Vec;
+    use uefi::mem::memory_map::MemoryDescriptor;
+    let descriptors: Vec<MemoryDescriptor> = mem_map.entries().cloned().collect();
 
-        let phys_start = entry.phys_start;
-        let page_count = entry.page_count;
-        let region_end = phys_start + (page_count * 4096);
-        if entry.ty == MemoryType::CONVENTIONAL
-            && region_end > max_phys_addr.unwrap_or(PhysAddr::new(0)).as_u64()
-        {
-            max_phys_addr = Some(PhysAddr::new(region_end));
-        }
-    }
-    if let Some(addr) = max_phys_addr {
-        if addr.as_u64() != 0 {
-            info!("Max usable physical address found: 0x{:x}", addr.as_u64());
-            Some(addr)
-        } else {
-            panic!("No usable memory found in UEFI memory map!");
-        }
-    } else {
-        panic!("No usable memory found in UEFI memory map!");
-    }
+    PhysAddr::new(
+        descriptors
+            .iter()
+            .map(|x| x.phys_start + x.page_count * 4096)
+            .max()
+            .unwrap()
+            .max(0x1_0000_0000),
+    )
 }
 
 #[cfg(feature = "uefi")]
