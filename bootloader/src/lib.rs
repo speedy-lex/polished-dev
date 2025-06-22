@@ -46,7 +46,7 @@ use polished_graphics::framebuffer::FramebufferInfo;
 #[cfg(feature = "uefi")]
 use uefi::boot::exit_boot_services;
 #[cfg(feature = "uefi")]
-use uefi::mem::memory_map::MemoryMap;
+use uefi::mem::memory_map::{MemoryMap, MemoryMapOwned};
 #[cfg(feature = "uefi")]
 use uefi::{
     boot::{get_handle_for_protocol, open_protocol_exclusive},
@@ -166,10 +166,9 @@ pub fn boot_system(kernel_path: &str) {
 
     let mem_map =
         uefi::boot::memory_map(MemoryType::LOADER_DATA).expect("Failed to get memory map");
-    let max_usable_phys_addr = find_max_usable_phys_addr(&mem_map);
+    let max_usable_phys_addr = max_phys_addr(&mem_map);
     info!(
-        "Max usable physical address found: 0x{:x}",
-        max_usable_phys_addr.as_u64()
+        "Max usable physical address found: 0x{max_usable_phys_addr:x}"
     );
 
     info!("[boot] Starting kernel load from path: {kernel_path}");
@@ -241,20 +240,17 @@ pub fn boot_system(kernel_path: &str) {
 }
 
 #[cfg(feature = "uefi")]
-pub fn find_max_usable_phys_addr<T: MemoryMap>(mem_map: &T) -> PhysAddr {
-    extern crate alloc;
-    use alloc::vec::Vec;
-    use uefi::mem::memory_map::MemoryDescriptor;
-    let descriptors: Vec<MemoryDescriptor> = mem_map.entries().cloned().collect();
-
-    PhysAddr::new(
-        descriptors
-            .iter()
+pub fn max_phys_addr(memmap: &MemoryMapOwned) -> u64 {
+        memmap
+            .entries()
+            .filter(|x| x.ty.0 < 0x10 && x.phys_start < 0x0010_0000_0000) // skip weird custom stuff that is in the terabytes
             .map(|x| x.phys_start + x.page_count * 4096)
             .max()
             .unwrap()
-            .max(0x1_0000_0000),
-    )
+            // Always cover at least the first 4 GiB of physical memory. That area
+            // contains useful MMIO regions (local APIC, I/O APIC, PCI bars) that
+            // we want to make accessible to the kernel even if no DRAM exists >4GiB.
+            .max(0x1_0000_0000)
 }
 
 #[cfg(feature = "uefi")]

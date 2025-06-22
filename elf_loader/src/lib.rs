@@ -80,7 +80,7 @@ pub fn load_kernel(
     file_path: &str,
     page_table: &mut OffsetPageTable,
     frame_alloc: &mut impl FrameAllocator<Size4KiB>,
-    max_phys_addr: PhysAddr,
+    max_phys_addr: u64,
     offset_phys_addr: Option<PhysAddr>,
 ) -> unsafe extern "C" fn() -> ! {
     use x86_64::{structures::paging::{PageTable, OffsetPageTable}, VirtAddr};
@@ -191,7 +191,7 @@ pub fn load_kernel(
 #[cfg(feature = "uefi")]
 pub fn setup_paging_with_offset(
     offset_phys_addr: PhysAddr,
-    max_phys_addr: PhysAddr,
+    max_phys_addr: u64,
     frame_alloc: &mut polished_allocators::frame::BumpFrameAllocator,
 ) -> *mut x86_64::structures::paging::PageTable {
     use x86_64::PhysAddr;
@@ -250,7 +250,7 @@ pub fn setup_paging_with_offset(
     // Use offset_phys_addr as the kernel virtual base and map physical memory up to max_phys_addr
     let kernel_virt_base = offset_phys_addr.as_u64();
     let kernel_phys_base = 0x00100000u64;
-    let kernel_phys_end = max_phys_addr.as_u64();
+    let kernel_phys_end = max_phys_addr;
     let kernel_size = kernel_phys_end.saturating_sub(kernel_phys_base);
     let num_pages = kernel_size.div_ceil(0x1000);
     for i in 0..num_pages {
