@@ -79,8 +79,7 @@ unsafe fn kernel_entry(boot_info_ptr: *const BootInfo) -> ! {
     polished_gdt::init_gdt();
     info("GDT initialized");
 
-    // Set the PML4 physical address for physmap page table access
-    // set_boot_pml4_phys(boot_info.pml4_phys);
+    // Setup high half kernel page table
 
     // Set up interrupts and PS/2
     init_interrupts();

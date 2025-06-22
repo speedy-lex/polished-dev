@@ -128,6 +128,7 @@ name = "polished_elf_loader"
 version = "0.1.1"
 dependencies = [
  "log",
+ "polished_allocators",
  "polished_files",
  "polished_graphics",
  "uefi",

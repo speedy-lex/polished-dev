@@ -46,12 +46,14 @@ use polished_graphics::framebuffer::FramebufferInfo;
 #[cfg(feature = "uefi")]
 use uefi::boot::exit_boot_services;
 #[cfg(feature = "uefi")]
+use uefi::mem::memory_map::MemoryMap;
+#[cfg(feature = "uefi")]
 use uefi::{
     boot::{get_handle_for_protocol, open_protocol_exclusive},
     proto::console::text::Output,
 };
-
-// static NOOP_LOGGER;
+#[cfg(feature = "uefi")]
+use x86_64::PhysAddr;
 
 /// Boot information structure passed to the kernel by the bootloader.
 ///
@@ -123,14 +125,25 @@ pub struct BootInfo {
 pub fn boot_system(kernel_path: &str) {
     use polished_allocators::frame::BumpFrameAllocator;
     use polished_serial_logging::kprint;
-    use uefi::{boot::{self, memory_map, MemoryType}, mem::memory_map::MemoryMap};
+    use uefi::{
+        boot::{MemoryType, memory_map},
+        mem::memory_map::MemoryMap,
+    };
     use x86_64::structures::paging::OffsetPageTable;
     info!("[boot] Searching for long free memory region");
     let mmap = memory_map(MemoryType::LOADER_DATA).unwrap();
-    let memory_region = mmap.entries().find(|desc| desc.ty == MemoryType::CONVENTIONAL && desc.page_count >= 128).unwrap();
+    let memory_region = mmap
+        .entries()
+        .find(|desc| desc.ty == MemoryType::CONVENTIONAL && desc.page_count >= 128)
+        .unwrap();
     info!("[boot] Starting page table and frame allocator initialization");
-    let mut frame_alloc = unsafe { BumpFrameAllocator::new(memory_region.phys_start as usize, memory_region.phys_start as usize + 128 * 4096) };
-    
+    let mut frame_alloc = unsafe {
+        BumpFrameAllocator::new(
+            memory_region.phys_start as usize,
+            memory_region.phys_start as usize + 128 * 4096,
+        )
+    };
+
     // Disable write protection so we can write to the page table
     // Enable NX pageflag for safety
     unsafe {
@@ -148,11 +161,22 @@ pub fn boot_system(kernel_path: &str) {
         &mut *(curr.start_address().as_u64() as *mut PageTable)
     };
     use x86_64::VirtAddr;
-    // Offset is zero because everything is identity mapped
+    // Offset is zero because everything is identity mapped by UEFI
     let mut page_table = unsafe { OffsetPageTable::new(page_table, VirtAddr::zero()) };
 
+    let mem_map =
+        uefi::boot::memory_map(MemoryType::LOADER_DATA).expect("Failed to get memory map");
+    let max_usable_phys_addr = if let Some(addr) = find_max_usable_phys_addr(&mem_map) {
+        info!("Max usable physical address found: 0x{:x}", addr.as_u64());
+        addr
+    } else {
+        panic!("Failed to get max phys addr");
+    };
+
     info!("[boot] Starting kernel load from path: {kernel_path}");
-    let kernel_entry = load_kernel(kernel_path, &mut page_table, &mut frame_alloc);
+    // Set up physical memory offset (1 MiB)
+    let phys_offset = PhysAddr::new(0x100000);
+    let kernel_entry = load_kernel(kernel_path, &mut page_table, &mut frame_alloc, max_usable_phys_addr, Some(phys_offset));
     info!("[boot] Kernel load finished");
     info!("[boot] Kernel entry point: 0x{:x}", kernel_entry as usize);
 
@@ -170,9 +194,6 @@ pub fn boot_system(kernel_path: &str) {
         }
         polished_graphics::framebuffer::FramebufferFormat::BltOnly => (0u8, 0u32),
     };
-
-    // NOTE: Paging setup and manipulation removed as requested.
-    // You should implement your own paging setup here.
 
     log::set_max_level(log::LevelFilter::Off);
     kprint!("Falling back to kprint for early boot logging");
@@ -214,26 +235,32 @@ pub fn boot_system(kernel_path: &str) {
     kprint!("[boot] Kernel entry point call finished (should never return)");
 }
 
-// #[cfg(feature = "uefi")]
-// fn find_usable_frame_range(mem_map: &mut MemoryMapIter) -> Option<(u64, u64)> {
-//     let mut usable_start = u64::MAX;
-//     let mut usable_end = 0;
+#[cfg(feature = "uefi")]
+pub fn find_max_usable_phys_addr<T: MemoryMap>(mem_map: &T) -> Option<PhysAddr> {
+    let mut max_phys_addr: Option<PhysAddr> = None;
+    for entry in mem_map.entries() {
+        use uefi::boot::MemoryType;
 
-//     for desc in mem_map {
-//         if desc.ty == MemoryType::CONVENTIONAL {
-//             let start = desc.phys_start;
-//             let end = start + desc.page_count * 4096;
-//             usable_start = usable_start.min(start);
-//             usable_end = usable_end.max(end);
-//         }
-//     }
-
-//     if usable_start < usable_end {
-//         Some((usable_start, usable_end))
-//     } else {
-//         None
-//     }
-// }
+        let phys_start = entry.phys_start;
+        let page_count = entry.page_count;
+        let region_end = phys_start + (page_count * 4096);
+        if entry.ty == MemoryType::CONVENTIONAL
+            && region_end > max_phys_addr.unwrap_or(PhysAddr::new(0)).as_u64()
+        {
+            max_phys_addr = Some(PhysAddr::new(region_end));
+        }
+    }
+    if let Some(addr) = max_phys_addr {
+        if addr.as_u64() != 0 {
+            info!("Max usable physical address found: 0x{:x}", addr.as_u64());
+            Some(addr)
+        } else {
+            panic!("No usable memory found in UEFI memory map!");
+        }
+    } else {
+        panic!("No usable memory found in UEFI memory map!");
+    }
+}
 
 #[cfg(feature = "uefi")]
 /// Initializes the UEFI environment and clears the screen.

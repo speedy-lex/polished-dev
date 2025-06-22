@@ -13,9 +13,6 @@
 - [ ] Set up a higher-half mapping (e.g., `0xFFFF_9000_0000_0000`):
   - [ ] Use PML4[256] = PDPT
   - [ ] PDPT[0] = 1GiB huge page of physical memory (same frame)
-- [ ] Setup recursive mapping:
-  - [ ] Set PML4[511] = physical address of PML4 | present | writable
-  - [ ] This enables you to reference the page tables themselves using special virtual addresses (e.g., `0xFFFF_FFFF_FFFF_F000`).
 - [ ] Load CR3 with physical address of PML4
 - [ ] Enable paging:
   - [ ] Set CR0.PG = 1, CR4.PAE = 1, EFER.LME = 1, etc.
@@ -23,11 +20,11 @@
 
 ## Kernel Paging Initialization
 
-### Create a `OffsetPageTable` or manual mapper
+### Create an Offset Map for Page Tracking
 
-- [ ] Use the recursive slot to get a virtual address to the PML4:
-  - [ ] `let level_4_table: &mut PageTable = &mut *(0xFFFF_FFFF_FFFF_F000 as *mut PageTable);`
-- [ ] Use that address to initialize an `OffsetPageTable`, if desired:
+- [ ] Use a fixed offset to calculate virtual addresses for physical frames:
+  - [ ] `let virt_addr = phys_addr + phys_to_virt_offset;`
+- [ ] Use that offset to initialize an `OffsetPageTable`:
   - [ ]
     ```rust
     let mapper = unsafe { OffsetPageTable::new(level_4_table, phys_to_virt_offset) };
@@ -39,12 +36,11 @@
 
 - [ ] Select a virtual address (e.g., `0xFFFF_9000_0000_0000`)
 - [ ] Allocate a physical frame for backing memory
-- [ ] Walk or create the PML4 → PDPT → PD → PT chain using the recursive mapping:
-  - [ ] PML4: `0xFFFF_FFFF_FFFF_F000 + 8 * index`
-  - [ ] PDPT: `0xFFFF_FFFF_FF800000 + (index << 21)`
-  - [ ] PD: `0xFFFF_FF8000000000 + (index << 30)`
-  - [ ] PT: `0xFFFF_000000000000 + (index << 39)`
-    - [ ] (This depends on the layout you assume; most crates hide this)
+- [ ] Walk or create the PML4 → PDPT → PD → PT chain manually:
+  - [ ] PML4: `phys_to_virt_offset + physical_address_of_pml4 + 8 * index`
+  - [ ] PDPT: `phys_to_virt_offset + physical_address_of_pdpt + (index << 21)`
+  - [ ] PD: `phys_to_virt_offset + physical_address_of_pd + (index << 30)`
+  - [ ] PT: `phys_to_virt_offset + physical_address_of_pt + (index << 39)`
 - [ ] Write entry in PT with:
   - [ ] `physical_address | PTE_FLAGS (present | writable | etc.)`
 - [ ] Flush TLB entry for that virtual address:
@@ -60,7 +56,6 @@
 
 ## Debugging Checklist
 
-- [ ] Did you set PML4[511] = PML4 physical address (recursive)?
 - [ ] Did you use `invlpg`/`flush()` after writing a new PTE?
 - [ ] Did your physical frame allocator hand you a clean, aligned page?
 - [ ] Did you map all intermediate tables (PDPT, PD, PT) before final entry?
@@ -68,12 +63,3 @@
 - [ ] Did you use correct flags: PRESENT | WRITABLE (and NO_EXEC where needed)?
 - [ ] Does your memory map avoid reusing firmware/reserved memory?
 - [ ] Are you using 4 KiB pages (not 2M/1G) when setting lower-level mappings?
-
-## Quick Notes on Recursive Mapping
-
-- [ ] With `PML4[511] = self`, you can reference all page tables via:
-  - [ ] PML4 = `0xFFFF_FFFF_FFFF_F000`
-  - [ ] PDPT = `0xFFFF_FFFF_FF800000`
-  - [ ] PD = `0xFFFF_FF8000000000`
-  - [ ] PT = `0xFFFF_000000000000`
-  - [ ] These allow walking/modifying page tables without knowing physical addresses.

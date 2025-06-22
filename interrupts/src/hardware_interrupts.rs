@@ -50,7 +50,7 @@ pub extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: Interrupt
 
     if scancode == 0xFA {
         kprint!(
-            "[INFO] INT 0x21: Keyboard interrupt, received 0xFA (possible ACK, not a keypress)\r\n"
+            "[INFO] INT 0x21: Keyboard interrupt, received 0xFA (possible ACK, not a keypress)\r"
         );
     } else if scancode & 0x80 == 0 {
         // Only handle key press (make) codes, ignore break codes
@@ -58,14 +58,14 @@ pub extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: Interrupt
         match converted {
             Some(ascii) if ascii.is_ascii_graphic() || ascii == b' ' => {
                 kprint!(
-                    "[INFO] INT 0x21: Keyboard interrupt, scancode: {:#x} | ASCII: '{}'\r\n",
+                    "[INFO] INT 0x21: Keyboard interrupt, scancode: {:#x} | ASCII: '{}'\r",
                     scancode,
                     ascii as char
                 );
             }
             _ => {
                 kprint!(
-                    "[INFO] INT 0x21: Keyboard interrupt, scancode: {:#x} | ASCII: Unknown\r\n",
+                    "[INFO] INT 0x21: Keyboard interrupt, scancode: {:#x} | ASCII: Unknown\r",
                     scancode
                 );
             }
